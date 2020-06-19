@@ -1,0 +1,59 @@
+---
+- hosts: deb
+  vars:
+    gitignore: | # List of files to ignore that will be added to the .gitignore file
+      /*-
+      /shadow
+      /gshadow
+      /lvm/backup/
+      /ssh/*_key
+      /foobar
+      *.lock
+      .#*
+      /apt/auth.conf
+      /apt/auth.conf.d/
+
+  tasks:
+  - name: Install etckeeper
+    tags: install
+    apt:
+      pkg:
+      - etckeeper
+      update_cache: yes
+
+# TODO remove the files to be ignored from the history with something like git filter-branch
+# TODO for each in files_to_gitgnore run git filter-branch
+
+  - name: Status repo
+    tags: status
+    shell: if [ -n "$(git -C /etc/ status --porcelain)" -o -n "$(git -C /etc/ diff --shortstat)" ]; then echo "dirty"; fi
+    register: status
+
+  - name: Commit uncommited changes
+    tags: uncommited
+    shell: etckeeper commit "Automatic commit"
+    when: status.stdout == "dirty"
+
+  - name: Update .gitignore for etckeeper
+    tags: addignores
+    blockinfile:
+      path: /etc/.gitignore
+      insertafter: 'end section managed by etckeeper'
+      # TODO check why the following didn't work.
+      #  marker: "#{mark} OUR CUSTOM GITIGNORE"
+      block:
+        '{{ gitignore }}'
+
+# confirm the previous chances by amending the Initial commit.
+# TODO if the previous task doesn't make any change to .gitignore the following will fail too.
+  - name: Commit uncommited changes
+    tags: updateignores
+    shell: if [ -n "$(git -C /etc/ status --porcelain .gitignore)" ]; then echo "change"; fi
+    register: updateignores
+
+# TODO commit uncommited changes. Note that this fails if there are no uncommited changes
+  - name: Commit changes to .gitignore for etckeeper
+    tags: commitignores
+    shell: git -C /etc/ add .gitignore && git -C /etc/ commit -m "Updating .gitignore"
+    when: updateignores.stdout == "change"
+...
